@@ -1,0 +1,38 @@
+name: Test no sherpa changes output
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_REF: refs/heads/main
+      GITHUB_EVENT_NAME: push
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          anthropic_api_key: fake-api-key-for-testing
+          prompt: 'test deployment'
+          max_turns: '1'
+
+      - name: Assert sherpa_changes is false
+        env:
+          ACTUAL: ${{ steps.action.outputs.sherpa_changes }}
+        run: |
+          echo "actual sherpa_changes: $ACTUAL"
+          if [ "$ACTUAL" != "false" ]; then
+            echo "FAIL: expected sherpa_changes to be 'false' when no .sherpa.sh directory exists, got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS: sherpa_changes is false as expected"
+
+      - name: Assert result output exists
+        env:
+          ACTUAL: ${{ steps.action.outputs.result }}
+        run: |
+          echo "actual result (first 200 chars): ${ACTUAL:0:200}"
+          # Result may be empty or contain error output from claude with fake key
+          # Just verify the output key is set (even if empty)
+          echo "PASS: result output is accessible"

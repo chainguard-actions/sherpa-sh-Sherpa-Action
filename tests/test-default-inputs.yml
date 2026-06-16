@@ -1,0 +1,38 @@
+name: Test default inputs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_REF: refs/heads/main
+      GITHUB_EVENT_NAME: push
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          # Only required input provided; all others use defaults
+          anthropic_api_key: fake-api-key-for-testing
+
+      - name: Assert sherpa_changes is false with default inputs
+        env:
+          ACTUAL: ${{ steps.action.outputs.sherpa_changes }}
+        run: |
+          echo "actual sherpa_changes: $ACTUAL"
+          if [ "$ACTUAL" != "false" ]; then
+            echo "FAIL: expected sherpa_changes='false' with default inputs, got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS: sherpa_changes is false as expected"
+
+      - name: Verify .sherpa-plugin was copied to workspace
+        run: |
+          echo "Checking .sherpa-plugin directory in workspace..."
+          if [ ! -d "$GITHUB_WORKSPACE/.sherpa-plugin" ]; then
+            echo "FAIL: .sherpa-plugin directory was not copied to workspace"
+            exit 1
+          fi
+          echo "PASS: .sherpa-plugin directory exists at $GITHUB_WORKSPACE/.sherpa-plugin"
+          ls -la "$GITHUB_WORKSPACE/.sherpa-plugin"
