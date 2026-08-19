@@ -1,0 +1,48 @@
+name: Test default prompt (empty)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          anthropic_api_key: 'sk-ant-fake-key-for-testing'
+          # prompt is not set — uses default empty string
+          max_turns: '1'
+        continue-on-error: true
+
+      - name: Assert sherpa plugin directory was created
+        run: |
+          if [ ! -d "$GITHUB_WORKSPACE/.sherpa-plugin" ]; then
+            echo "FAIL: .sherpa-plugin directory was not created in workspace"
+            exit 1
+          fi
+          echo "PASS: .sherpa-plugin directory exists"
+
+      - name: Assert sherpa plugin has expected structure
+        run: |
+          if [ ! -d "$GITHUB_WORKSPACE/.sherpa-plugin/.claude-plugin" ]; then
+            echo "FAIL: .sherpa-plugin/.claude-plugin directory not found"
+            exit 1
+          fi
+          if [ ! -f "$GITHUB_WORKSPACE/.sherpa-plugin/.claude-plugin/plugin.json" ]; then
+            echo "FAIL: plugin.json not found in .sherpa-plugin/.claude-plugin"
+            exit 1
+          fi
+          echo "PASS: sherpa plugin structure is correct"
+          ls -la "$GITHUB_WORKSPACE/.sherpa-plugin/.claude-plugin/"
+
+      - name: Assert sherpa_changes output is false
+        env:
+          SHERPA_CHANGES: ${{ steps.action.outputs.sherpa_changes }}
+        run: |
+          echo "sherpa_changes: $SHERPA_CHANGES"
+          if [ "$SHERPA_CHANGES" != "false" ]; then
+            echo "FAIL: expected sherpa_changes to be 'false', got '$SHERPA_CHANGES'"
+            exit 1
+          fi
+          echo "PASS: sherpa_changes is false as expected"

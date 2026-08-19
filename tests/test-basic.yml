@@ -1,0 +1,36 @@
+name: Test basic usage - no sherpa.sh changes
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          anthropic_api_key: 'sk-ant-fake-key-for-testing'
+          prompt: 'test deployment'
+          max_turns: '1'
+        continue-on-error: true
+
+      - name: Assert sherpa_changes output is false (no .sherpa.sh directory)
+        env:
+          SHERPA_CHANGES: ${{ steps.action.outputs.sherpa_changes }}
+        run: |
+          echo "sherpa_changes: $SHERPA_CHANGES"
+          if [ "$SHERPA_CHANGES" != "false" ]; then
+            echo "FAIL: expected sherpa_changes to be 'false', got '$SHERPA_CHANGES'"
+            exit 1
+          fi
+          echo "PASS: sherpa_changes is false as expected"
+
+      - name: Assert sherpa plugin was copied to workspace
+        run: |
+          if [ ! -d "$GITHUB_WORKSPACE/.sherpa-plugin" ]; then
+            echo "FAIL: .sherpa-plugin directory was not created in workspace"
+            exit 1
+          fi
+          echo "PASS: .sherpa-plugin directory exists"
+          ls -la "$GITHUB_WORKSPACE/.sherpa-plugin"

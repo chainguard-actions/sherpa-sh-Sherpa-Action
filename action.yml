@@ -76,49 +76,30 @@ runs:
       id: claude
       shell: bash
       env:
-        ENV_VARS_JSON: ${{ toJSON(env) }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_MAX_TURNS: ${{ inputs.max_turns }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
         WORKSPACE: ${{ github.workspace }}
-        MAX_TURNS: ${{ inputs.max_turns }}
-        PROMPT: ${{ inputs.prompt }}
       run: |
-        # Parse and export env vars from the shared env context
-        # Use a safe approach instead of eval: write to a temp file and source it
-        if [ "$ENV_VARS_JSON" != "{}" ] && [ -n "$ENV_VARS_JSON" ]; then
-          TMPFILE=$(mktemp)
-          echo "$ENV_VARS_JSON" | jq -r 'to_entries | .[] | "export \(.key)=\(.value | @sh)"' > "$TMPFILE"
-          # Validate the file only contains export statements before sourcing
-          if grep -qvE '^export [A-Za-z_][A-Za-z0-9_]*=' "$TMPFILE"; then
-            echo "Warning: unexpected content in env export file, skipping"
-          else
-            # shellcheck disable=SC1090
-            source "$TMPFILE"
-          fi
-          rm -f "$TMPFILE"
-        fi
-
-        # Override with inputs (these take precedence)
-        export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
-        export GITHUB_TOKEN="$GITHUB_TOKEN"
-
         # Run claude and capture output
+        # Pass the prompt as a separately quoted argument to prevent shell metacharacter injection
         OUTPUT=$(claude \
           --dangerously-skip-permissions \
           --print \
           --plugin-dir "$WORKSPACE/.sherpa-plugin" \
-          --max-turns "$MAX_TURNS" \
-          "/Sherpa/deploy" ${PROMPT:+"$PROMPT"} 2>&1) || true
+          --max-turns "$INPUT_MAX_TURNS" \
+          "/Sherpa/deploy" "$INPUT_PROMPT" 2>&1) || true
 
         echo "$OUTPUT"
 
-        # Set output using multiline delimiter, sanitizing newlines in the delimiter line
-        # Use a random delimiter to prevent injection via OUTPUT content
-        DELIM="EOF_$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
+        # Set output using multiline delimiter, sanitizing to prevent injection
+        # Strip both newlines and carriage returns to prevent GITHUB_OUTPUT injection
+        safe_output=$(printf '%s' "$OUTPUT" | tr -d '\n\r')
         {
-          printf 'result<<%s\n' "$DELIM"
-          printf '%s\n' "$OUTPUT"
-          printf '%s\n' "$DELIM"
+          echo "result<<SHERPA_EOF"
+          echo "$safe_output"
+          echo "SHERPA_EOF"
         } >> "$GITHUB_OUTPUT"
     - name: Commit Sherpa changes
       id: commit-sherpa

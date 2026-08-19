@@ -1,0 +1,44 @@
+name: Test sherpa.sh changes are committed
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create .sherpa.sh directory with a file to simulate deployment memory
+        run: |
+          mkdir -p .sherpa.sh
+          echo "deployment-memory: test" > .sherpa.sh/memory.yaml
+          echo "Created .sherpa.sh/memory.yaml"
+
+      - id: action
+        uses: .
+        with:
+          anthropic_api_key: 'sk-ant-fake-key-for-testing'
+          prompt: 'test deployment with memory'
+          max_turns: '1'
+        continue-on-error: true
+
+      - name: Assert sherpa_changes output is true (new .sherpa.sh file was staged and committed)
+        env:
+          SHERPA_CHANGES: ${{ steps.action.outputs.sherpa_changes }}
+        run: |
+          echo "sherpa_changes: $SHERPA_CHANGES"
+          if [ "$SHERPA_CHANGES" != "true" ]; then
+            echo "FAIL: expected sherpa_changes to be 'true', got '$SHERPA_CHANGES'"
+            exit 1
+          fi
+          echo "PASS: sherpa_changes is true as expected"
+
+      - name: Assert .sherpa.sh/memory.yaml was committed
+        run: |
+          # Check that the file is tracked in git (committed)
+          if ! git log --oneline -1 --diff-filter=A -- .sherpa.sh/memory.yaml | grep -q .; then
+            echo "FAIL: .sherpa.sh/memory.yaml was not committed"
+            git log --oneline -5
+            exit 1
+          fi
+          echo "PASS: .sherpa.sh/memory.yaml was committed"
+          git log --oneline -3

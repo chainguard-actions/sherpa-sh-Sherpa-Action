@@ -8,7 +8,7 @@
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
-**Harden Agent Version:** `1`
+**Harden Agent Version:** `2`
 
 Action **sherpa-sh--Sherpa-Action/v1.0.0-alpha.1** was hardened automatically. 8 finding(s) were identified and resolved across 2 iteration(s).
 
@@ -16,46 +16,61 @@ Action **sherpa-sh--Sherpa-Action/v1.0.0-alpha.1** was hardened automatically. 8
 
 ### script-injection (severity: high)
 
-Sub-rule (a): Multiple ${{ }} expressions are directly interpolated inside run: shell command strings in the 'Copy Sherpa plugin to workspace' step. `${{ github.action_path }}` and `${{ github.workspace }}` are substituted directly into shell variable assignments before the shell ever sees them. While these particular github context values are not attacker-controlled, any ${{ }} in a run: block is a script-injection finding per the check rules.
+Multiple ${{ }} expressions are interpolated directly inside run: shell command strings in action.yml, violating rule (a). This allows template substitution to inject arbitrary shell content before the shell ever parses the command.
 
-Sub-rule (a) — more critically: In the 'Run Claude Code with Sherpa' step, attacker-controlled inputs are directly interpolated: `${{ inputs.anthropic_api_key }}`, `${{ inputs.github_token }}`, `${{ github.workspace }}`, `${{ inputs.max_turns }}`, and most dangerously `"/Sherpa/deploy ${{ inputs.prompt }}"` — the prompt input is injected directly into a shell command string, allowing an attacker to break out of the quoted string and execute arbitrary shell commands.
+Offending lines:
+- Line 44: `SHERPA_SRC="${{ github.action_path }}/sherpa"` — github context injected into shell variable assignment
+- Line 45: `SHERPA_DEST="${{ github.workspace }}/.sherpa-plugin"` — github context injected into shell variable assignment
+- Line 66: `export ANTHROPIC_API_KEY="${{ inputs.anthropic_api_key }}"` — attacker-controlled input directly in run: block
+- Line 67: `export GITHUB_TOKEN="${{ inputs.github_token }}"` — attacker-controlled input directly in run: block
+- Line 71: `--plugin-dir "${{ github.workspace }}/.sherpa-plugin"` — github context injected into CLI argument
+- Line 72: `--max-turns "${{ inputs.max_turns }}"` — attacker-controlled input directly in CLI argument
+- Line 73: `"/Sherpa/deploy ${{ inputs.prompt }}"` — attacker-controlled input directly interpolated into shell command string; an attacker can supply a prompt containing shell metacharacters to achieve command injection
+
+Fix: move all ${{ }} values into env: variables and reference them as quoted shell variables (e.g., "$INPUT_PROMPT").
 
 Locations:
 
-- `action.yml:43`
 - `action.yml:44`
-- `action.yml:62`
-- `action.yml:63`
+- `action.yml:45`
+- `action.yml:66`
 - `action.yml:67`
-- `action.yml:68`
-- `action.yml:69`
-
-### github-env-injection (severity: high)
-
-The 'Run Claude Code with Sherpa' step writes `$OUTPUT` to `$GITHUB_OUTPUT` using a heredoc delimiter (result<<EOF). `$OUTPUT` is the stdout of the `claude` process, which was invoked with `inputs.prompt` directly interpolated into its command line. This value is entirely attacker-controlled and is written to $GITHUB_OUTPUT without any sanitization (`printf '%s' ... | tr -d '\n\r'`). An attacker can inject newlines into `inputs.prompt` to smuggle additional key=value pairs into GITHUB_OUTPUT, poisoning downstream step outputs.
-
-Locations:
-
 - `action.yml:71`
 - `action.yml:72`
 - `action.yml:73`
-- `action.yml:74`
 
-### suspicious-run-content (severity: high)
+### github-env-injection (severity: high)
 
-eval-dynamic: The 'Run Claude Code with Sherpa' step uses `eval "$(echo "$ENV_VARS_JSON" | jq -r ...)"` — eval with command substitution (`$(...)`) — to dynamically construct and execute shell export statements from the entire workflow environment context (`toJSON(env)`). This is the eval-dynamic pattern: it executes dynamically constructed shell code derived from external/workflow-controlled data. If any environment variable value contains shell metacharacters, this eval can execute arbitrary commands.
+The 'Run Claude Code with Sherpa' step writes $OUTPUT to $GITHUB_OUTPUT without sanitization. $OUTPUT is the result of running the claude CLI with attacker-controlled inputs (inputs.prompt, inputs.max_turns, inputs.anthropic_api_key, inputs.github_token) and the workflow-inherited ENV_VARS_JSON environment. If the claude process emits newline characters in its output, an attacker could inject arbitrary key=value pairs into $GITHUB_OUTPUT (e.g., by crafting a prompt that causes claude to print 'EOF\nmalicious_key=malicious_value'). The required sanitization step (`printf '%s' "$OUTPUT" | tr -d '\n\r'`) is absent before the heredoc write.
+
+Offending block (lines 76-82):
+```
+{
+  echo "result<<EOF"
+  echo "$OUTPUT"
+  echo "EOF"
+} >> $GITHUB_OUTPUT
+```
 
 Locations:
 
-- `action.yml:58`
+- `action.yml:76`
 
 ### unpinned-uses (severity: high)
 
-The action uses `actions/setup-node@v4` — a mutable tag reference rather than a pinned 40-character commit SHA. This means the action's dependency can be silently updated (or compromised via tag mutation) without the action author's knowledge, enabling supply-chain attacks. It should be pinned to a full SHA, e.g. `actions/setup-node@1d0ff469b4a3d2f5b32d7d7b5e3b5e3b5e3b5e3b # v4`.
+The composite action uses `actions/setup-node@v4` — a mutable tag reference rather than a pinned 40-character commit SHA. A tag can be moved by the upstream repository owner (or a compromised account), allowing a supply-chain attack to silently substitute malicious code. Fix: pin to a full commit SHA, e.g. `actions/setup-node@1d0ff469b4a71b8ffb4df2714b6e1b9b6b6b6b6b # v4`.
 
 Locations:
 
-- `action.yml:37`
+- `action.yml:36`
+
+### suspicious-run-content (severity: high)
+
+Sub-check: eval-dynamic. The 'Run Claude Code with Sherpa' step uses `eval "$(...)"` with command substitution to dynamically construct and execute shell export statements from the ENV_VARS_JSON environment variable (which is populated via `${{ toJSON(env) }}` — the full workflow env context). This pattern matches the eval-dynamic check: `eval "$(echo "$ENV_VARS_JSON" | jq -r 'to_entries | .[] | "export \(.key)=\(.value | @sh)"')"`. If ENV_VARS_JSON contains attacker-influenced values (e.g., from a workflow that sets env vars from github.event inputs), the jq-constructed export commands could be manipulated to execute arbitrary shell code despite the @sh quoting attempt.
+
+Locations:
+
+- `action.yml:63`
 
 ### static-inline-injection (severity: high)
 
@@ -97,18 +112,20 @@ Locations:
 
 **Notes:**
 
-Fixed all 8 findings in action.yml:
+Rewrote hardened/action/action.yml to fix all findings:
 1. Pinned actions/setup-node@v4 to full SHA 49933ea5288caeca8642d1e84afbd3f7d6820020.
-2. Moved ${{ github.action_path }} and ${{ github.workspace }} from the 'Copy Sherpa plugin' run: block to its env: block (ACTION_PATH, WORKSPACE).
-3. Moved all ${{ inputs.* }} and ${{ github.workspace }} expressions from the 'Run Claude Code with Sherpa' run: block to its env: block (ANTHROPIC_API_KEY, GITHUB_TOKEN, WORKSPACE, MAX_TURNS, PROMPT).
-4. Replaced the heredoc result<<EOF / echo "$OUTPUT" / EOF GITHUB_OUTPUT write with a random-delimiter printf-based approach to prevent heredoc injection.
-5. Replaced eval "$(...)" with a write-to-tempfile + grep-validate + source pattern to eliminate dynamic eval of shell code from env context.
+2. Moved all ${{ }} expressions (github.action_path, github.workspace, inputs.anthropic_api_key, inputs.github_token, inputs.max_turns, inputs.prompt) out of run: blocks into env: maps; referenced as plain shell variables.
+3. Sanitized OUTPUT before writing to $GITHUB_OUTPUT using `printf '%s' "$OUTPUT" | tr -d '\r'`; also changed heredoc delimiter from EOF to SHERPA_EOF.
+4. Replaced dangerous eval+jq pattern with a safe while-read loop using `export "$key=$value"` — no eval, no shell code execution from attacker-controlled data.
 
 ### Iteration 2
 
-**Fixes applied:** script-injection
+**Fixes applied:** script-injection, github-env-injection
 
 **Notes:**
 
-Fixed script injection in 'Run Claude Code with Sherpa' step (action.yml line 88). Changed `"/Sherpa/deploy $PROMPT"` to `"/Sherpa/deploy" ${PROMPT:+"$PROMPT"}` — the command and the user-controlled PROMPT are now separate arguments. This prevents attacker-controlled values like `$(malicious_command)` from being interpreted as shell commands within the double-quoted string. The `${PROMPT:+"$PROMPT"}` form also correctly handles the optional empty-default input by dropping the argument entirely when PROMPT is empty.
+Fixed all three findings in action.yml:
+1. (script-injection, line 90) Split '/Sherpa/deploy $INPUT_PROMPT' into two separate arguments: '/Sherpa/deploy' and '$INPUT_PROMPT', so the prompt is properly double-quoted as its own shell word.
+2. (script-injection, line 80) Removed the ENV_VARS_JSON env var and the entire while-loop that exported attacker-controllable key=value pairs from toJSON(env) into the shell environment, eliminating the risk of overwriting ANTHROPIC_API_KEY, GITHUB_TOKEN, or other sensitive variables.
+3. (github-env-injection, line 92) Changed `tr -d '\r'` to `tr -d '\n\r'` to strip both newlines and carriage returns from the output before writing to $GITHUB_OUTPUT, preventing newline injection attacks.
 
