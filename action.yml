@@ -76,30 +76,40 @@ runs:
       id: claude
       shell: bash
       env:
+        ENV_VARS_JSON: ${{ toJSON(env) }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_WORKSPACE: ${{ github.workspace }}
         INPUT_MAX_TURNS: ${{ inputs.max_turns }}
         INPUT_PROMPT: ${{ inputs.prompt }}
-        WORKSPACE: ${{ github.workspace }}
       run: |
+        # Parse and export ALL env vars from the shared env context
+        if [ "$ENV_VARS_JSON" != "{}" ] && [ -n "$ENV_VARS_JSON" ]; then
+          while IFS= read -r line; do
+            export "$line"
+          done < <(printf '%s' "$ENV_VARS_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"')
+        fi
+
+        # Override with inputs (these take precedence)
+        export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+        export GITHUB_TOKEN="$GITHUB_TOKEN"
+
         # Run claude and capture output
-        # Pass the prompt as a separately quoted argument to prevent shell metacharacter injection
         OUTPUT=$(claude \
           --dangerously-skip-permissions \
           --print \
-          --plugin-dir "$WORKSPACE/.sherpa-plugin" \
+          --plugin-dir "$INPUT_WORKSPACE/.sherpa-plugin" \
           --max-turns "$INPUT_MAX_TURNS" \
-          "/Sherpa/deploy" "$INPUT_PROMPT" 2>&1) || true
+          "/Sherpa/deploy $INPUT_PROMPT" 2>&1) || true
 
         echo "$OUTPUT"
 
         # Set output using multiline delimiter, sanitizing to prevent injection
-        # Strip both newlines and carriage returns to prevent GITHUB_OUTPUT injection
-        safe_output=$(printf '%s' "$OUTPUT" | tr -d '\n\r')
+        safe_output=$(printf '%s' "$OUTPUT" | tr -d '\r')
         {
-          echo "result<<SHERPA_EOF"
+          echo "result<<EOF"
           echo "$safe_output"
-          echo "SHERPA_EOF"
+          echo "EOF"
         } >> "$GITHUB_OUTPUT"
     - name: Commit Sherpa changes
       id: commit-sherpa
