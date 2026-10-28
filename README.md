@@ -6,9 +6,9 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 
 ## Versions
 
-| Version | Tag | Upstream commit |
-|---------|-----|-----------------|
-| v1.0.0-alpha.1 | [`v1.0.0-alpha.1`](https://github.com/chainguard-actions/sherpa-sh-Sherpa-Action/tree/v1.0.0-alpha.1) | [`f1b7363`](https://github.com/sherpa-sh/Sherpa-Action/commit/f1b73634161233bfd096e4c62e041e4bd938426d) |
+| Version | Tag | Upstream commit | Hardening report |
+|---------|-----|-----------------|------------------|
+| v1.0.0-alpha.1 | [`v1.0.0-alpha.1`](https://github.com/chainguard-actions/sherpa-sh-Sherpa-Action/tree/v1.0.0-alpha.1) | [`f1b7363`](https://github.com/sherpa-sh/Sherpa-Action/commit/f1b73634161233bfd096e4c62e041e4bd938426d) | [`HARDENING.md`](https://github.com/chainguard-actions/sherpa-sh-Sherpa-Action/blob/v1.0.0-alpha.1/HARDENING.md) |
 
 ## Privacy
 
